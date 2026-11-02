@@ -41,9 +41,9 @@ Useful database commands: `npx netlify database status`, `npx netlify database c
 
 ## Sign-in
 
-People sign in with their Wayne State access ID. Only a salted scrypt hash is stored (`users.access_id_hash`),
-and the IDs themselves never go in the repository. Manage people with the script, which asks for the access
-ID at a hidden prompt:
+Only a salted scrypt hash is stored (`users.access_id_hash`),
+and the passwords themselves never go in the repository. Manage people with the script, which asks for the access
+password at a hidden prompt:
 
 ```bash
 node scripts/users.mjs list
