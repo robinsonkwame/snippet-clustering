@@ -2,14 +2,15 @@
 // Each check returns { id, label, status: 'pass' | 'fail' | 'pending', detail, ms }.
 // None of them reads or returns board data (snippets, cards, events).
 
-import { getDatabase } from "@netlify/database";
 import { getStore } from "@netlify/blobs";
+import { passcodeRequired } from "./auth.mjs";
+import { database } from "./db.mjs";
 
 // Tables created by netlify/database/migrations; keep in step with new migrations.
 export const EXPECTED_TABLES = [
   "users", "sessions", "snippets", "cards", "categories", "category_labels",
   "cell_notes", "notes", "comments", "locks", "relations", "relation_evidence",
-  "propositions", "events",
+  "propositions", "events", "sign_in_attempts",
 ];
 
 // Blob stores the app uses. `snapshots` holds the CSV snapshots (spec: Backups);
@@ -18,9 +19,6 @@ export const SNAPSHOT_STORE = "snapshots";
 export const SYSTEM_STORE = "system";
 export const SCHEDULER_HEARTBEAT_KEY = "scheduler/last-run";
 export const SNAPSHOT_INTERVAL_MINUTES = 15;
-
-let db;
-const database = () => (db ??= getDatabase());
 
 async function timed(id, label, fn) {
   const started = Date.now();
@@ -86,6 +84,21 @@ export function checkAppendOnly() {
   });
 }
 
+export function checkSignIn() {
+  return timed("sign_in", "Sign-in and sessions", async () => {
+    const [{ users }] = await database().sql`
+      SELECT count(*)::int AS users FROM users WHERE active AND access_id_hash IS NOT NULL`;
+    const passcode = passcodeRequired() ? "board passcode required" : "no board passcode set";
+    if (users === 0) {
+      return {
+        status: "pending",
+        detail: `Ready, but no one can sign in yet: add people with scripts/users.mjs (${passcode})`,
+      };
+    }
+    return { detail: `${users} active ${users === 1 ? "person" : "people"} can sign in; ${passcode}` };
+  });
+}
+
 export function checkBlobs() {
   return timed("blobs", "Netlify Blobs (snapshot storage)", async () => {
     const store = getStore({ name: SNAPSHOT_STORE, consistency: "strong" });
@@ -130,7 +143,7 @@ export async function runAllChecks(context) {
     checkDatabase(),
   ]);
   const dbChecks = databaseCheck.status === "pass"
-    ? await Promise.all([checkSchema(), checkAppendOnly()])
+    ? await Promise.all([checkSchema(), checkAppendOnly(), checkSignIn()])
     : [];
   return [functions, databaseCheck, ...dbChecks, blobs, scheduler];
 }

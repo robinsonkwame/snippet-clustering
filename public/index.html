@@ -63,16 +63,34 @@
     ul.plain { padding-left: 20px; margin: 0; }
     ul.plain li { margin-bottom: 6px; }
     code { font-size: 13px; background: var(--surface); padding: 1px 4px; border-radius: 3px; }
+    form.signin { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+    form.signin label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; }
+    form.signin input {
+      font: inherit; color: var(--text); background: var(--bg);
+      border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; width: 180px;
+    }
+    form.signin button { margin-top: 0; }
+    #signin-result { margin-top: 10px; min-height: 1.45em; }
   </style>
 </head>
 <body>
 <main>
   <h1>Value Matrix Board</h1>
-  <p class="muted">Infrastructure status. This page holds no board data; the web API and the board UI are not built yet.</p>
+  <p class="muted">Infrastructure status. This page holds no board data; the board API and UI are not built yet.</p>
 
   <p class="summary" id="summary" aria-live="polite">Running checks…</p>
   <ul class="checks" id="checks"></ul>
   <button id="rerun" type="button" disabled>Run checks again</button>
+
+  <h2>Sign-in</h2>
+  <p class="muted">Try the sign-in Functions. The passcode is needed only if <code>BOARD_PASSCODE</code> is set.</p>
+  <form class="signin" id="signin">
+    <label>Access ID <input name="access_id" autocomplete="username" required></label>
+    <label>Passcode <input name="passcode" type="password" autocomplete="current-password"></label>
+    <button type="submit">Sign in</button>
+    <button type="button" id="signout">Sign out</button>
+  </form>
+  <p id="signin-result" aria-live="polite"></p>
 
   <h2>What is enabled</h2>
   <ul class="plain">
@@ -84,12 +102,15 @@
       <code>events</code>; <code>npm test</code> proves it against a throwaway database.</li>
     <li><strong>Netlify Blobs</strong>: the <code>snapshots</code> store accepts, returns and deletes CSV files.</li>
     <li><strong>Scheduled function</strong>: <code>scheduled-snapshot</code> runs every 15 minutes and records a heartbeat.</li>
+    <li><strong>Sign-in and sessions</strong>: <code>/api/sign-in</code>, <code>/api/sign-out</code> and
+      <code>/api/session</code>. Access IDs are stored only as scrypt hashes; sessions last 12 hours in an
+      HTTP-only cookie; five failed attempts lock a client out for 15 minutes. Functions that touch board data
+      wrap their handler in <code>withSession</code>.</li>
     <li><strong>Privacy headers</strong>: every path sends <code>X-Robots-Tag: noindex</code>, and <code>robots.txt</code> disallows all crawlers.</li>
   </ul>
 
   <h2>Not built yet</h2>
   <ul class="plain">
-    <li>Sign-in and sessions (access ID check, cookie, lockout)</li>
     <li>Board API: import, move, copy, pile edit, note, comment, relation, events-since, snapshot, export</li>
     <li>The React Flow board itself</li>
   </ul>
@@ -128,6 +149,17 @@
     };
   }
 
+  async function signedOutCheck() {
+    // A browser with no session cookie must get nothing from a protected Function.
+    const res = await fetch("/api/session", { credentials: "omit", cache: "no-store" });
+    return {
+      label: "Signed-out requests refused",
+      status: res.status === 401 ? "pass" : "fail",
+      detail: res.status === 401 ? "/api/session answers 401 without a session cookie"
+                                 : "/api/session answered " + res.status + " without a session cookie",
+    };
+  }
+
   async function run() {
     rerun.disabled = true;
     summary.textContent = "Running checks… (the database may take a few seconds to wake)";
@@ -140,6 +172,8 @@
     } catch (error) {
       checks = [{ label: "Netlify Functions", status: "fail", detail: "Could not reach /api/health: " + error.message }];
     }
+    try { checks.push(await signedOutCheck()); }
+    catch (error) { checks.push({ label: "Signed-out requests refused", status: "fail", detail: error.message }); }
     try { checks.push(await headerCheck()); }
     catch (error) { checks.push({ label: "Search engines blocked", status: "fail", detail: error.message }); }
 
@@ -155,6 +189,41 @@
 
   rerun.addEventListener("click", run);
   run();
+
+  const form = document.getElementById("signin");
+  const result = document.getElementById("signin-result");
+
+  async function showSession() {
+    const res = await fetch("/api/session", { cache: "no-store" });
+    if (res.ok) {
+      const { user, expires_at } = await res.json();
+      result.textContent = "Signed in as " + user.display_name + " (" + user.role + ") until " +
+        new Date(expires_at).toLocaleString();
+    } else {
+      result.textContent = "Not signed in.";
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const res = await fetch("/api/sign-in", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ access_id: data.get("access_id"), passcode: data.get("passcode") }),
+    });
+    form.reset();
+    if (res.ok) return showSession();
+    const { error } = await res.json().catch(() => ({ error: "Sign-in failed (" + res.status + ")" }));
+    result.textContent = error;
+  });
+
+  document.getElementById("signout").addEventListener("click", async () => {
+    await fetch("/api/sign-out", { method: "POST" });
+    showSession();
+  });
+
+  showSession();
 </script>
 </body>
 </html>
