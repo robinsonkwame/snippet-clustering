@@ -26,9 +26,13 @@ async function timed(id, label, fn) {
     const { status = "pass", detail } = await fn();
     return { id, label, status, detail, ms: Date.now() - started };
   } catch (error) {
-    return { id, label, status: "fail", detail: error.message, ms: Date.now() - started };
+    return { id, label, status: "fail", detail: describeError(error), ms: Date.now() - started };
   }
 }
+
+// db.sql wraps Postgres errors as "Failed query: ..." and keeps the real reason in `cause`.
+const describeError = (error) =>
+  error.cause?.message ? `${error.cause.message} (${error.message.split("\n")[0]})` : error.message;
 
 export function checkFunctions(context) {
   return timed("functions", "Netlify Functions", async () => ({
@@ -56,11 +60,14 @@ export function checkSchema() {
       return { status: "fail", detail: `Missing tables: ${missing.join(", ")}. Run the migrations.` };
     }
 
-    const [{ tracking }] = await database().sql`SELECT to_regclass('netlify.migrations') AS tracking`;
+    // Netlify's own record of applied migrations. Informational only: on deployed sites the
+    // platform owns this table and the Functions' role may not be allowed to read it.
     let applied = "";
-    if (tracking) {
+    try {
       const migrations = await database().sql`SELECT name FROM netlify.migrations ORDER BY name`;
       applied = `; migrations: ${migrations.map((m) => m.name).join(", ")}`;
+    } catch (error) {
+      applied = `; migration history not readable here (${describeError(error)})`;
     }
     return { detail: `All ${EXPECTED_TABLES.length} tables present${applied}` };
   });
