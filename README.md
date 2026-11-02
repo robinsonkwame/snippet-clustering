@@ -54,8 +54,16 @@ node scripts/users.mjs revoke ahmed    # signs them out everywhere at once; `res
 ```
 
 It uses the local `netlify dev` database unless `NETLIFY_DB_URL` is set. For a deployed project, a Team
-Owner copies the production connection string from the Netlify UI (Data & Storage > Database) and runs
-`NETLIFY_DB_URL='...' node scripts/users.mjs ...`.
+Owner copies the production connection string from the Netlify UI (Data & Storage > Database). It holds
+the database owner's password, so load it at a hidden prompt rather than typing it into a command, where
+it would land in shell history:
+
+```bash
+read -rsp "Connection string: " NETLIFY_DB_URL && export NETLIFY_DB_URL && echo   # bash
+read -rs "NETLIFY_DB_URL?Connection string: " && export NETLIFY_DB_URL && echo     # zsh
+node scripts/users.mjs list        # an empty table on a new project, not your local test users
+unset NETLIFY_DB_URL               # when done
+```
 
 - A session is a random token in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` over HTTPS) lasting
   12 hours. The database stores only the token's SHA-256 hash; `sessions.session_id` is a separate random ID

@@ -26,7 +26,8 @@ const { positionals, values } = parseArgs({
 const [command, userId] = positionals;
 
 function connectionString() {
-  if (process.env.NETLIFY_DB_URL) return process.env.NETLIFY_DB_URL;
+  // pg already treats sslmode=require as verify-full and warns about it; ask for verify-full outright.
+  if (process.env.NETLIFY_DB_URL) return process.env.NETLIFY_DB_URL.replace("sslmode=require", "sslmode=verify-full");
   const out = execFileSync("npx", ["netlify", "database", "connect", "--json"], {
     encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
   });
