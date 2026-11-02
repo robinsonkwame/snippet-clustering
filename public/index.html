@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Value Matrix Board: infrastructure status</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --surface: #f7f7f5;
+      --text: #1d1d1b;
+      --muted: #5c5c57;
+      --border: #dcdcd6;
+      --accent: #2456c7;
+      --pass: #1f7a3a;
+      --fail: #b3261e;
+      --pending: #8a5a00;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161615;
+        --surface: #1f1f1d;
+        --text: #ecece8;
+        --muted: #a9a9a2;
+        --border: #3a3a36;
+        --accent: #8fb0ff;
+        --pass: #6fd08c;
+        --fail: #ff8a80;
+        --pending: #f0c060;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 40px 16px 64px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 36px 0 10px; }
+    p { margin: 0 0 12px; }
+    .muted { color: var(--muted); }
+    .summary { margin: 20px 0 8px; font-weight: 600; }
+    ul.checks { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--border); }
+    ul.checks li {
+      display: grid; grid-template-columns: 84px 1fr; gap: 4px 12px;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .badge { font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    .badge.pass { color: var(--pass); }
+    .badge.fail { color: var(--fail); }
+    .badge.pending { color: var(--pending); }
+    .label { font-weight: 600; }
+    .detail { grid-column: 2; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+    button {
+      font: inherit; padding: 6px 14px; margin-top: 12px;
+      border: 1px solid var(--accent); color: var(--accent); background: transparent;
+      border-radius: 4px; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    ul.plain { padding-left: 20px; margin: 0; }
+    ul.plain li { margin-bottom: 6px; }
+    code { font-size: 13px; background: var(--surface); padding: 1px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Value Matrix Board</h1>
+  <p class="muted">Infrastructure status. This page holds no board data; the web API and the board UI are not built yet.</p>
+
+  <p class="summary" id="summary" aria-live="polite">Running checks…</p>
+  <ul class="checks" id="checks"></ul>
+  <button id="rerun" type="button" disabled>Run checks again</button>
+
+  <h2>What is enabled</h2>
+  <ul class="plain">
+    <li><strong>Netlify Functions</strong>: <code>/api/health</code> runs the checks above on every load.</li>
+    <li><strong>Netlify Database</strong> (Postgres): the full table set from the specification
+      (users, sessions, snippets, cards, categories, labels, cell notes, notes, comments, locks,
+      relations, evidence, propositions, events), applied by Netlify's automatic migrations.</li>
+    <li><strong>Append-only audit log</strong>: triggers reject UPDATE, DELETE and TRUNCATE on
+      <code>events</code>; <code>npm test</code> proves it against a throwaway database.</li>
+    <li><strong>Netlify Blobs</strong>: the <code>snapshots</code> store accepts, returns and deletes CSV files.</li>
+    <li><strong>Scheduled function</strong>: <code>scheduled-snapshot</code> runs every 15 minutes and records a heartbeat.</li>
+    <li><strong>Privacy headers</strong>: every path sends <code>X-Robots-Tag: noindex</code>, and <code>robots.txt</code> disallows all crawlers.</li>
+  </ul>
+
+  <h2>Not built yet</h2>
+  <ul class="plain">
+    <li>Sign-in and sessions (access ID check, cookie, lockout)</li>
+    <li>Board API: import, move, copy, pile edit, note, comment, relation, events-since, snapshot, export</li>
+    <li>The React Flow board itself</li>
+  </ul>
+</main>
+<script>
+  const list = document.getElementById("checks");
+  const summary = document.getElementById("summary");
+  const rerun = document.getElementById("rerun");
+
+  function row(check) {
+    const li = document.createElement("li");
+    const badge = document.createElement("span");
+    badge.className = "badge " + check.status;
+    badge.textContent = check.status;
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = check.label + (check.ms != null ? "  ·  " + check.ms + " ms" : "");
+    const detail = document.createElement("span");
+    detail.className = "detail";
+    detail.textContent = check.detail || "";
+    li.append(badge, label, detail);
+    return li;
+  }
+
+  async function headerCheck() {
+    // Runs in the browser, since the headers are added by Netlify's edge, not by a Function.
+    const res = await fetch("/robots.txt", { cache: "no-store" });
+    const tag = res.headers.get("x-robots-tag") || "";
+    const body = await res.text();
+    const ok = tag.includes("noindex") && /Disallow:\s*\/\s*$/m.test(body);
+    return {
+      label: "Search engines blocked",
+      status: ok ? "pass" : "fail",
+      detail: ok ? "X-Robots-Tag: " + tag + "; robots.txt disallows all"
+                 : "Missing noindex header or robots.txt rule (got header: \"" + tag + "\")",
+    };
+  }
+
+  async function run() {
+    rerun.disabled = true;
+    summary.textContent = "Running checks… (the database may take a few seconds to wake)";
+    list.replaceChildren();
+    let checks = [];
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      const body = await res.json();
+      checks = body.checks;
+    } catch (error) {
+      checks = [{ label: "Netlify Functions", status: "fail", detail: "Could not reach /api/health: " + error.message }];
+    }
+    try { checks.push(await headerCheck()); }
+    catch (error) { checks.push({ label: "Search engines blocked", status: "fail", detail: error.message }); }
+
+    list.replaceChildren(...checks.map(row));
+    const failed = checks.filter((c) => c.status === "fail").length;
+    const pending = checks.filter((c) => c.status === "pending").length;
+    summary.textContent = failed
+      ? failed + " of " + checks.length + " checks failed"
+      : "All " + (checks.length - pending) + " checks passed" + (pending ? ", " + pending + " pending" : "") +
+        " · " + new Date().toLocaleString();
+    rerun.disabled = false;
+  }
+
+  rerun.addEventListener("click", run);
+  run();
+</script>
+</body>
+</html>

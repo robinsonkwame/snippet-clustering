@@ -1,0 +1,22 @@
+# Value Matrix Board: Netlify configuration.
+# No build step yet; the React app (to come) will replace `publish` with its build output.
+[build]
+  publish = "public"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[dev]
+  # Serve the static status page; functions and the local database start with it.
+  framework = "#static"
+  port = 8888
+
+# The board is never public: keep every path out of search engines.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow, noarchive"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

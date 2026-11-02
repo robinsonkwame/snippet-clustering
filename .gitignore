@@ -1,0 +1,9 @@
+node_modules/
+.netlify/
+.env
+.env.*
+# Real data never goes in the repository (spec: Architecture and hosting).
+snippets.json
+data/
+*.zip
+deno.lock
